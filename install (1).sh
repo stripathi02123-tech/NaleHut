@@ -21,7 +21,7 @@
 #     --skip-virtio        do not download virtio-win ISO
 #     --no-color           disable all colors/animations
 #     --panel-dir DIR      build panel from DIR instead of auto-detect/clone
-#     --repo-url URL       clone panel from URL (default: NaleHut-Panel-1.0)
+#     --repo-url URL       download panel ZIP from URL (default: NaleHut source ZIP)
 #     --no-tools           do not copy VM tools to /usr/local/bin
 #     -h, --help           show this help
 # ============================================================================
@@ -31,7 +31,7 @@ NH_KIT_VERSION="1.0.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/ui.sh"
 
-DEFAULT_REPO_URL="https://github.com/stripathi02123-tech/NaleHut-Panel-1.0.git"
+DEFAULT_REPO_URL="https://github.com/stripathi02123-tech/NaleHut/raw/refs/heads/main/nalehut-panel-src.zip"
 CONF_DIR="/etc/nalehut"
 CONF_FILE="$CONF_DIR/vm.conf"
 ISO_DIR="/var/lib/libvirt/images"
@@ -178,10 +178,10 @@ pkg_list_stack_opt() {
 }
 pkg_list_panel_must() {
     case "$PM" in
-        apt)    echo "build-essential autoconf automake libtool pkg-config gettext git python3 nodejs npm libglib2.0-dev libjson-glib-dev libgnutls28-dev libkrb5-dev libpam0g-dev libsystemd-dev" ;;
-        dnf)    echo "gcc gcc-c++ make autoconf automake libtool pkgconf-pkg-config gettext git python3 nodejs npm glib2-devel json-glib-devel gnutls-devel krb5-devel pam-devel systemd-devel" ;;
-        pacman) echo "base-devel autoconf automake libtool pkgconf gettext git python3 nodejs npm glib2 json-glib gnutls krb5 pam systemd" ;;
-        zypper) echo "gcc gcc-c++ make autoconf automake libtool pkg-config gettext-tools git python3 nodejs-default npm glib2-devel libjson-glib-devel gnutls-devel krb5-devel pam-devel systemd-devel" ;;
+        apt)    echo "unzip build-essential autoconf automake libtool pkg-config gettext git python3 nodejs npm libglib2.0-dev libjson-glib-dev libgnutls28-dev libkrb5-dev libpam0g-dev libsystemd-dev" ;;
+        dnf)    echo "unzip gcc gcc-c++ make autoconf automake libtool pkgconf-pkg-config gettext git python3 nodejs npm glib2-devel json-glib-devel gnutls-devel krb5-devel pam-devel systemd-devel" ;;
+        pacman) echo "unzip base-devel autoconf automake libtool pkgconf gettext git python3 nodejs npm glib2 json-glib gnutls krb5 pam systemd" ;;
+        zypper) echo "unzip gcc gcc-c++ make autoconf automake libtool pkg-config gettext-tools git python3 nodejs-default npm glib2-devel libjson-glib-devel gnutls-devel krb5-devel pam-devel systemd-devel" ;;
     esac
 }
 pkg_list_fallback() {
@@ -269,21 +269,7 @@ step_panel() {
         fi
     fi
 
-    # --- locate / fetch source ------------------------------------------
-    if [ -z "$PANEL_DIR" ]; then
-        if [ -f "$SCRIPT_DIR/Makefile.am" ] && [ -f "$SCRIPT_DIR/configure.ac" ]; then
-            PANEL_DIR="$SCRIPT_DIR"
-            info "Using panel sources next to install.sh: $PANEL_DIR"
-        else
-            PANEL_DIR="$PWD/NaleHut-Panel"
-            info "Panel sources not found — cloning from GitHub"
-            run_bar "Cloning $REPO_URL" \
-                git clone --depth 50 "$REPO_URL" "$PANEL_DIR"
-        fi
-    fi
-    [ -f "$PANEL_DIR/configure.ac" ] || die "no configure.ac in $PANEL_DIR"
-
-    # --- build dependencies ----------------------------------------------
+    # --- install build tools + ZIP extractor -------------------------------
     local pmust
     pmust=$(pkg_list_panel_must)
     pm_refresh
@@ -295,6 +281,29 @@ step_panel() {
             pacman) pacman -S --noconfirm --needed $pmust ;;
             zypper) zypper --non-interactive install --force-resolution $pmust ;;
         esac"
+
+    # --- download + extract the JavaScript/Cockpit source ZIP ---------------
+    if [ -z "$PANEL_DIR" ]; then
+        PANEL_DIR="$PWD/NaleHut-Panel"
+    fi
+    mkdir -p "$PANEL_DIR"
+    local panel_zip
+    panel_zip="$(mktemp /tmp/nalehut-panel-XXXXXX.zip)"
+    info "Downloading NaleHut source archive"
+    run_bar "Downloading panel ZIP" curl -fL --retry 3 --retry-delay 2 -o "$panel_zip" "$REPO_URL"
+    run_bar "Extracting panel ZIP" unzip -oq "$panel_zip" -d "$PANEL_DIR"
+    rm -f "$panel_zip"
+
+    # ZIPs may contain one enclosing directory; locate the actual source root.
+    if [ ! -f "$PANEL_DIR/configure.ac" ]; then
+        local configure_file
+        configure_file="$(find "$PANEL_DIR" -mindepth 2 -maxdepth 5 -type f -name configure.ac -print -quit)"
+        if [ -n "$configure_file" ]; then
+            PANEL_DIR="$(dirname "$configure_file")"
+        fi
+    fi
+    [ -f "$PANEL_DIR/configure.ac" ] || die "ZIP extracted, but configure.ac was not found under $PANEL_DIR"
+    ok "Panel source extracted to $PANEL_DIR"
 
     # --- node >= 16 required by the web build ------------------------------
     local nmajor
