@@ -30,22 +30,24 @@ set -Eeuo pipefail
 NH_KIT_VERSION="1.0.0"
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-$0}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_SOURCE")" 2>/dev/null && pwd || pwd)"
-UI_LIB="$SCRIPT_DIR/lib/ui.sh"
-if [ ! -f "$UI_LIB" ]; then
+# Use the original UI library uploaded at the repository root.
+# When the installer is run as a downloaded single file, fetch that exact file.
+UI_LIB="$SCRIPT_DIR/ui.sh"
+if [ ! -s "$UI_LIB" ]; then
     UI_LIB_DIR="/tmp/nalehut-installer-lib"
     mkdir -p "$UI_LIB_DIR"
     UI_LIB="$UI_LIB_DIR/ui.sh"
-    UI_URL="https://raw.githubusercontent.com/stripathi02123-tech/NaleHut/main/lib/ui.sh"
+    UI_URL="https://raw.githubusercontent.com/stripathi02123-tech/NaleHut/main/ui.sh"
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL --retry 3 "$UI_URL" -o "$UI_LIB"
     elif command -v wget >/dev/null 2>&1; then
         wget -qO "$UI_LIB" "$UI_URL"
     else
-        echo "ERROR: curl or wget is required to download lib/ui.sh" >&2
+        echo "ERROR: curl or wget is required to download the repository ui.sh" >&2
         exit 1
     fi
 fi
-[ -s "$UI_LIB" ] || { echo "ERROR: failed to fetch lib/ui.sh" >&2; exit 1; }
+[ -s "$UI_LIB" ] || { echo "ERROR: failed to fetch repository ui.sh" >&2; exit 1; }
 source "$UI_LIB"
 
 DEFAULT_REPO_URL="https://github.com/stripathi02123-tech/NaleHut/raw/refs/heads/main/nalehut-panel-src.zip"
@@ -515,7 +517,7 @@ install_tools() {
         ok "$(basename "$t")"
     done
     $SUDO mkdir -p /usr/local/lib
-    $SUDO install -m 0644 "$SCRIPT_DIR/lib/ui.sh" /usr/local/lib/ui.sh
+    $SUDO install -m 0644 "$UI_LIB" /usr/local/lib/ui.sh
     $SUDO install -m 0644 "$SCRIPT_DIR/lib/vm-common.sh" /usr/local/lib/vm-common.sh
     ok "Shared libs -> /usr/local/lib/{ui.sh,vm-common.sh}"
 }
