@@ -28,8 +28,25 @@
 set -Eeuo pipefail
 
 NH_KIT_VERSION="1.0.0"
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/ui.sh"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-$0}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_SOURCE")" 2>/dev/null && pwd || pwd)"
+UI_LIB="$SCRIPT_DIR/lib/ui.sh"
+if [ ! -f "$UI_LIB" ]; then
+    UI_LIB_DIR="/tmp/nalehut-installer-lib"
+    mkdir -p "$UI_LIB_DIR"
+    UI_LIB="$UI_LIB_DIR/ui.sh"
+    UI_URL="https://raw.githubusercontent.com/stripathi02123-tech/NaleHut/main/lib/ui.sh"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 3 "$UI_URL" -o "$UI_LIB"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$UI_LIB" "$UI_URL"
+    else
+        echo "ERROR: curl or wget is required to download lib/ui.sh" >&2
+        exit 1
+    fi
+fi
+[ -s "$UI_LIB" ] || { echo "ERROR: failed to fetch lib/ui.sh" >&2; exit 1; }
+source "$UI_LIB"
 
 DEFAULT_REPO_URL="https://github.com/stripathi02123-tech/NaleHut/raw/refs/heads/main/nalehut-panel-src.zip"
 CONF_DIR="/etc/nalehut"
