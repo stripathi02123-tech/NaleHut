@@ -66,6 +66,7 @@ PANEL_DIR=""
 REPO_URL="$DEFAULT_REPO_URL"
 
 PM=""          # apt | dnf | pacman | zypper
+KVM_AVAILABLE=0 # set only when /dev/kvm is exposed to this host
 DISTRO_ID="unknown"
 DISTRO_PRETTY="unknown"
 ACT_USER="${SUDO_USER:-$USER}"
@@ -123,12 +124,13 @@ step_preflight() {
     # CPU virtualization ----------------------------------------------------
     local virt_flags
     virt_flags=$(grep -Ecm1 'vmx|svm' /proc/cpuinfo || true)
-    if [ -e /dev/kvm ]; then
-        ok "KVM device present: /dev/kvm"
+    if [ -c /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+        KVM_AVAILABLE=1
+        ok "KVM device available: /dev/kvm"
     elif [ "$virt_flags" -ge 1 ] 2>/dev/null; then
-        warn "CPU supports virtualization but /dev/kvm is missing (load kvm module or reboot)"
+        warn "CPU virtualization flags exist, but usable /dev/kvm is unavailable"
     else
-        warn "No VT-x / AMD-V found — enable virtualization in BIOS/UEFI!"
+        warn "Hardware virtualization is not exposed by this VPS (no vmx/svm flags or /dev/kvm)"
     fi
 
     # disk space ------------------------------------------------------------
@@ -396,24 +398,31 @@ add_user_groups() {
 }
 
 step_services() {
-    step "Services  ·  libvirtd, network, cockpit.socket"
+    step "Services  ·  Cockpit and virtualization"
 
-    run_spinner "Enabling libvirtd" \
-        $SUDO systemctl enable --now libvirtd.service || warn "libvirtd enable failed"
-    $SUDO systemctl enable --now virtlogd.socket >/dev/null 2>&1 || true
-
-    if run_spinner "Starting default NAT network" start_default_net; then
-        ok "default network: active + autostart"
+    if [ "$KVM_AVAILABLE" -eq 1 ]; then
+        if run_spinner "Enabling libvirtd" $SUDO systemctl enable --now libvirtd.service; then
+            $SUDO systemctl enable --now virtlogd.socket >/dev/null 2>&1 || true
+            if run_spinner "Starting default NAT network" start_default_net; then
+                ok "default network: active + autostart"
+            else
+                warn "default network not available (inspect libvirt logs)"
+            fi
+            run_spinner "Adding $ACT_USER to libvirt + kvm groups" add_user_groups
+            ok "$ACT_USER added to libvirt/kvm (re-login to apply)"
+        else
+            warn "libvirtd failed to start; inspect: journalctl -u libvirtd -n 50"
+        fi
     else
-        warn "default network not available (check libvirtd logs)"
+        skip "libvirtd and default NAT network not started: KVM is unavailable on this host"
+        skip "VM creation is unavailable until the VPS provider exposes nested virtualization"
     fi
 
-    run_spinner "Adding $ACT_USER to libvirt + kvm groups" add_user_groups
-    ok "$ACT_USER is now in libvirt/kvm (log out+in to apply)"
-
-    run_spinner "Enabling cockpit.socket" \
-        $SUDO systemctl enable --now cockpit.socket || warn "cockpit.socket failed"
-    ok "Panel listening on https://$(hostname -I 2>/dev/null | awk '{print $1}'):9090"
+    if run_spinner "Enabling cockpit.socket" $SUDO systemctl enable --now cockpit.socket; then
+        ok "Cockpit listening on https://$(hostname -I 2>/dev/null | awk '{print $1}'):9090"
+    else
+        warn "cockpit.socket failed to start"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -448,10 +457,13 @@ verify_stack() {
 
     if [ -e /dev/kvm ]; then ok "/dev/kvm"; else fail "/dev/kvm missing (BIOS VT-x/AMD-V?)"; vwarn=$((vwarn+1)); fi
 
-    if command -v virsh >/dev/null 2>&1 && virsh -c qemu:///system version >/dev/null 2>&1; then
-        ok "libvirt $(virsh -c qemu:///system version | sed -n '1s/.*libvirt \([0-9.]*\).*/\1/p')"
+    if [ "$KVM_AVAILABLE" -ne 1 ]; then
+        skip "libvirt connectivity check skipped: KVM is not exposed by this host"
+    elif systemctl is-active --quiet libvirtd.service && command -v virsh >/dev/null 2>&1 \
+         && virsh -c qemu:///system version >/dev/null 2>&1; then
+        ok "libvirt daemon reachable via qemu:///system"
     else
-        warn "virsh not reachable via qemu:///system (group membership needs re-login)"
+        warn "libvirt daemon is not reachable; inspect: systemctl status libvirtd"
         vwarn=$((vwarn+1))
     fi
 
@@ -488,7 +500,7 @@ verify_stack() {
     if [ "$vwarn" -eq 0 ]; then
         ok "All checks passed — your host is Windows-VM ready!"
     else
-        warn "$vwarn warning(s) — review the lines above (usually needs a reboot / re-login)"
+        warn "$vwarn warning(s) — review the reported host capabilities and service status"
     fi
 }
 
@@ -518,8 +530,12 @@ install_tools() {
     done
     $SUDO mkdir -p /usr/local/lib
     $SUDO install -m 0644 "$UI_LIB" /usr/local/lib/ui.sh
-    $SUDO install -m 0644 "$SCRIPT_DIR/lib/vm-common.sh" /usr/local/lib/vm-common.sh
-    ok "Shared libs -> /usr/local/lib/{ui.sh,vm-common.sh}"
+    if [ -s "$SCRIPT_DIR/lib/vm-common.sh" ]; then
+        $SUDO install -m 0644 "$SCRIPT_DIR/lib/vm-common.sh" /usr/local/lib/vm-common.sh
+        ok "Shared libraries installed"
+    else
+        warn "VM helper library not bundled beside installer; skipping it (installer will continue)"
+    fi
 }
 
 # ---------------------------------------------------------------------------
