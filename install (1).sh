@@ -282,17 +282,20 @@ step_panel() {
             zypper) zypper --non-interactive install --force-resolution $pmust ;;
         esac"
 
-    # --- download + extract the JavaScript/Cockpit source ZIP ---------------
-    if [ -z "$PANEL_DIR" ]; then
+    # --- locate local source or download + extract source ZIP ---------------
+    if [ -z "$PANEL_DIR" ] && [ -f "$SCRIPT_DIR/configure.ac" ]; then
+        PANEL_DIR="$SCRIPT_DIR"
+        info "Using panel sources next to install.sh: $PANEL_DIR"
+    elif [ -z "$PANEL_DIR" ]; then
         PANEL_DIR="$PWD/NaleHut-Panel"
+        mkdir -p "$PANEL_DIR"
+        local panel_zip
+        panel_zip="$(mktemp /tmp/nalehut-panel-XXXXXX.zip)"
+        info "Downloading NaleHut source archive"
+        run_bar "Downloading panel ZIP" curl -fL --retry 3 --retry-delay 2 -o "$panel_zip" "$REPO_URL"
+        run_bar "Extracting panel ZIP" unzip -oq "$panel_zip" -d "$PANEL_DIR"
+        rm -f "$panel_zip"
     fi
-    mkdir -p "$PANEL_DIR"
-    local panel_zip
-    panel_zip="$(mktemp /tmp/nalehut-panel-XXXXXX.zip)"
-    info "Downloading NaleHut source archive"
-    run_bar "Downloading panel ZIP" curl -fL --retry 3 --retry-delay 2 -o "$panel_zip" "$REPO_URL"
-    run_bar "Extracting panel ZIP" unzip -oq "$panel_zip" -d "$PANEL_DIR"
-    rm -f "$panel_zip"
 
     # ZIPs may contain one enclosing directory; locate the actual source root.
     if [ ! -f "$PANEL_DIR/configure.ac" ]; then
@@ -302,8 +305,8 @@ step_panel() {
             PANEL_DIR="$(dirname "$configure_file")"
         fi
     fi
-    [ -f "$PANEL_DIR/configure.ac" ] || die "ZIP extracted, but configure.ac was not found under $PANEL_DIR"
-    ok "Panel source extracted to $PANEL_DIR"
+    [ -f "$PANEL_DIR/configure.ac" ] || die "configure.ac was not found under $PANEL_DIR"
+    ok "Panel source ready at $PANEL_DIR"
 
     # --- node >= 16 required by the web build ------------------------------
     local nmajor
