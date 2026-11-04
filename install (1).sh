@@ -355,11 +355,11 @@ step_panel() {
             info "no git tags found — pinning panel version to 1.0"
             run_bar "autoreconf (generating configure)" \
                 autoreconf -i --warnings obsolete
-            run_bar "configure --prefix=/usr" \
-                ./configure --prefix=/usr
+            run_bar "configure --prefix=/usr --disable-doc" \
+                ./configure --prefix=/usr --disable-doc
         else
-            run_bar "autogen + configure" \
-                ./autogen.sh --prefix=/usr
+            run_bar "autogen + configure (documentation disabled)" \
+                ./autogen.sh --prefix=/usr --disable-doc
         fi
     ) || { warn "source build failed"; fallback_distro_cockpit; return 0; }
 
